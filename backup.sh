@@ -34,7 +34,7 @@ export MYSQL_PWD="$DB_PASS"
 # ----------------------
 # Settings
 # ----------------------
-DATE=$(date +%F)
+DATE=$(date +%Y-%m-%d_%H-%M-%S)
 
 # Backup directory
 BACKUP_DIR="$SCRIPT_DIR/backups"
