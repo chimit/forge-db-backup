@@ -52,10 +52,10 @@ If you don't have a heartbeat URL yet, you can leave that field empty for now. Y
 
 ### 4. Set permissions
 
-Go to the **Commands** tab of your Forge site and run the following command:
+Go to the **Settings** -> **Deployments** tab of your Forge site and add the following command into the end of the **Deploy script**:
 
 ```bash
-chmod +x backup.sh
+chmod +x $FORGE_SITE_PATH/backup.sh
 ```
 
 This makes the backup script executable.
