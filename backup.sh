@@ -18,15 +18,11 @@ set +a
 
 # Validate required variables
 if [ -z "$DB_USERNAME" ] || [ -z "$DB_PASSWORD" ] || [ -z "$DB_DATABASES" ] || \
-   [ -z "$S3_BUCKET_NAME" ] || [ -z "$S3_ENDPOINT" ] || \
-   [ -z "$S3_ACCESS_KEY_ID" ] || [ -z "$S3_SECRET_ACCESS_KEY" ]; then
+   [ -z "$AWS_BUCKET" ] || [ -z "$AWS_ENDPOINT" ] || \
+   [ -z "$AWS_ACCESS_KEY_ID" ] || [ -z "$AWS_SECRET_ACCESS_KEY" ]; then
     echo "Error: Missing required environment variables in .env file"
     exit 1
 fi
-
-# Export AWS credentials for AWS CLI
-export AWS_ACCESS_KEY_ID="$S3_ACCESS_KEY_ID"
-export AWS_SECRET_ACCESS_KEY="$S3_SECRET_ACCESS_KEY"
 
 # Set MySQL password via environment variable
 export MYSQL_PWD="$DB_PASSWORD"
@@ -94,8 +90,8 @@ done
 # ----------------------
 # Upload to S3
 # ----------------------
-aws s3 sync $BACKUP_DIR "s3://$S3_BUCKET_NAME" \
-    --endpoint-url $S3_ENDPOINT \
+aws s3 sync $BACKUP_DIR "s3://$AWS_BUCKET" \
+    --endpoint-url $AWS_ENDPOINT \
     --exact-timestamps
 
 # ----------------------
@@ -108,7 +104,7 @@ for DATABASE in "${DATABASES[@]}"; do
     ls -t "$BACKUP_DIR/${DATABASE}_"*.sql.gz | tail -n +$((KEEP_COUNT + 1)) | xargs -I {} rm -f {}
 
     # --- S3 Cleanup ---
-    OBJECTS=$(aws s3api list-objects-v2 --bucket "$S3_BUCKET_NAME" --prefix "${DATABASE}_" --endpoint-url "$S3_ENDPOINT" --query "sort_by(Contents, &LastModified)[].[Key]" --output text)
+    OBJECTS=$(aws s3api list-objects-v2 --bucket "$AWS_BUCKET" --prefix "${DATABASE}_" --endpoint-url "$AWS_ENDPOINT" --query "sort_by(Contents, &LastModified)[].[Key]" --output text)
     OBJECT_COUNT=$(echo "$OBJECTS" | grep -c .)
 
     if [ "$OBJECT_COUNT" -gt "$KEEP_COUNT" ]; then
@@ -116,7 +112,7 @@ for DATABASE in "${DATABASES[@]}"; do
         OBJECTS_TO_DELETE=$(echo "$OBJECTS" | head -n $DELETE_COUNT | awk '{print "Key="$1}' | tr '\n' ' ')
 
         if [ -n "$OBJECTS_TO_DELETE" ]; then
-            aws s3api delete-objects --bucket "$S3_BUCKET_NAME" --delete "Objects=[{${OBJECTS_TO_DELETE%?}}]" --endpoint-url "$S3_ENDPOINT"
+            aws s3api delete-objects --bucket "$AWS_BUCKET" --delete "Objects=[{${OBJECTS_TO_DELETE%?}}]" --endpoint-url "$AWS_ENDPOINT"
         fi
     fi
 done
