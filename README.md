@@ -50,17 +50,7 @@ Go to **Settings** -> **Environment** tab of your Forge site. Here you can set y
 
 If you don't have a heartbeat URL yet, you can leave that field empty for now. You will be given one when you set up a scheduled task later.
 
-### 4. Set permissions
-
-Go to the **Settings** -> **Deployments** tab of your Forge site and add the following command into the end of the **Deploy script**:
-
-```bash
-chmod +x $FORGE_SITE_PATH/backup.sh
-```
-
-This makes the backup script executable.
-
-### 5. Schedule backups
+### 4. Schedule backups
 
 Go to **Processes** -> **Scheduler** tab of your Forge site and create a new scheduled task. Give it any name you like, e.g. `Database Backup`.
 
