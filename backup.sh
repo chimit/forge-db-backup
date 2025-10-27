@@ -17,7 +17,7 @@ source "$ENV_FILE"
 set +a
 
 # Validate required variables
-if [ -z "$DB_USER" ] || [ -z "$DB_PASS" ] || [ -z "$DB_NAMES" ] || \
+if [ -z "$DB_USERNAME" ] || [ -z "$DB_PASSWORD" ] || [ -z "$DB_DATABASES" ] || \
    [ -z "$S3_BUCKET_NAME" ] || [ -z "$S3_ENDPOINT" ] || \
    [ -z "$S3_ACCESS_KEY_ID" ] || [ -z "$S3_SECRET_ACCESS_KEY" ]; then
     echo "Error: Missing required environment variables in .env file"
@@ -29,7 +29,7 @@ export AWS_ACCESS_KEY_ID="$S3_ACCESS_KEY_ID"
 export AWS_SECRET_ACCESS_KEY="$S3_SECRET_ACCESS_KEY"
 
 # Set MySQL password via environment variable
-export MYSQL_PWD="$DB_PASS"
+export MYSQL_PWD="$DB_PASSWORD"
 
 # ----------------------
 # Settings
@@ -39,22 +39,23 @@ DATE=$(date +%Y-%m-%d_%H-%M-%S)
 # Backup directory
 BACKUP_DIR="$SCRIPT_DIR/backups"
 
-# Convert DB_NAMES from comma-separated string to array
-IFS=',' read -r -a DB_NAMES <<< "$DB_NAMES"
+# Convert DB_DATABASES from comma-separated string to array
+IFS=',' read -r -a DATABASES <<< "$DB_DATABASES"
 
 # --- Config for tables to ignore ---
-declare -A DB_IGNORE_TABLES
+declare -A IGNORE_TABLES
 
-# Parse IGNORE_TABLES format: "db1.table1,db1.table2,db2.table3"
-if [ -n "$IGNORE_TABLES" ]; then
-    IFS=',' read -r -a ENTRIES <<< "$IGNORE_TABLES"
+# Parse DB_IGNORE_TABLES format: "db1.table1,db1.table2,db2.table3"
+if [ -n "$DB_IGNORE_TABLES" ]; then
+    IFS=',' read -r -a ENTRIES <<< "$DB_IGNORE_TABLES"
+
     for ENTRY in "${ENTRIES[@]}"; do
-        IFS='.' read -r DB_NAME TABLE_NAME <<< "$ENTRY"
-        if [ -n "$DB_NAME" ] && [ -n "$TABLE_NAME" ]; then
-            if [ -n "${DB_IGNORE_TABLES[$DB_NAME]}" ]; then
-                DB_IGNORE_TABLES["$DB_NAME"]+=" $TABLE_NAME"
+        IFS='.' read -r DATABASE TABLE <<< "$ENTRY"
+        if [ -n "$DATABASE" ] && [ -n "$TABLE" ]; then
+            if [ -n "${IGNORE_TABLES[$DATABASE]}" ]; then
+                IGNORE_TABLES["$DATABASE"]+=" $TABLE"
             else
-                DB_IGNORE_TABLES["$DB_NAME"]="$TABLE_NAME"
+                IGNORE_TABLES["$DATABASE"]="$TABLE"
             fi
         fi
     done
@@ -68,26 +69,26 @@ echo "Starting database backup..."
 # ----------------------
 # Backup Databases
 # ----------------------
-for DB_NAME in "${DB_NAMES[@]}"; do
-    echo "Backing up ${DB_NAME}..."
+for DATABASE in "${DATABASES[@]}"; do
+    echo "Backing up ${DATABASE}..."
 
     IGNORE_PARAMS=""
     # Check if there are tables to ignore and build params
-    if [[ -v "DB_IGNORE_TABLES[$DB_NAME]" ]]; then
-        echo "  Ignoring tables: ${DB_IGNORE_TABLES[$DB_NAME]}"
-        for TBL in ${DB_IGNORE_TABLES[$DB_NAME]}; do
-            IGNORE_PARAMS+=" --ignore-table=${DB_NAME}.${TBL}"
+    if [[ -v "IGNORE_TABLES[$DATABASE]" ]]; then
+        echo "  Ignoring tables: ${IGNORE_TABLES[$DATABASE]}"
+        for TBL in ${IGNORE_TABLES[$DATABASE]}; do
+            IGNORE_PARAMS+=" --ignore-table=${DATABASE}.${TBL}"
         done
     fi
 
     # Dump structure, then data (with ignores if any)
     (
-        mysqldump --no-data -u $DB_USER $DB_NAME
+        mysqldump --no-data -u $DB_USERNAME $DATABASE
         mysqldump --single-transaction --quick --no-tablespaces --disable-keys --set-gtid-purged=OFF \
-            -u $DB_USER $DB_NAME $IGNORE_PARAMS --no-create-info
-    ) | gzip > "$BACKUP_DIR/${DB_NAME}_${DATE}.sql.gz"
+            -u $DB_USERNAME $DATABASE $IGNORE_PARAMS --no-create-info
+    ) | gzip > "$BACKUP_DIR/${DATABASE}_${DATE}.sql.gz"
 
-    echo "  ✓ ${DB_NAME} backed up successfully"
+    echo "  ✓ ${DATABASE} backed up successfully"
 done
 
 # ----------------------
@@ -100,14 +101,14 @@ aws s3 sync $BACKUP_DIR "s3://$S3_BUCKET_NAME" \
 # ----------------------
 # Cleanup old backups
 # ----------------------
-for DB_NAME in "${DB_NAMES[@]}"; do
-    echo "Cleaning up old backups for ${DB_NAME}..."
+for DATABASE in "${DATABASES[@]}"; do
+    echo "Cleaning up old backups for ${DATABASE}..."
 
     # --- Local Cleanup ---
-    ls -t "$BACKUP_DIR/${DB_NAME}_"*.sql.gz | tail -n +$((KEEP_COUNT + 1)) | xargs -I {} rm -f {}
+    ls -t "$BACKUP_DIR/${DATABASE}_"*.sql.gz | tail -n +$((KEEP_COUNT + 1)) | xargs -I {} rm -f {}
 
     # --- S3 Cleanup ---
-    OBJECTS=$(aws s3api list-objects-v2 --bucket "$S3_BUCKET_NAME" --prefix "${DB_NAME}_" --endpoint-url "$S3_ENDPOINT" --query "sort_by(Contents, &LastModified)[].[Key]" --output text)
+    OBJECTS=$(aws s3api list-objects-v2 --bucket "$S3_BUCKET_NAME" --prefix "${DATABASE}_" --endpoint-url "$S3_ENDPOINT" --query "sort_by(Contents, &LastModified)[].[Key]" --output text)
     OBJECT_COUNT=$(echo "$OBJECTS" | grep -c .)
 
     if [ "$OBJECT_COUNT" -gt "$KEEP_COUNT" ]; then
