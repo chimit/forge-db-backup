@@ -1,5 +1,8 @@
 #!/bin/bash
 
+# Exit on error and pipe failures
+set -eo pipefail
+
 # ----------------------
 # Load environment variables
 # ----------------------
@@ -41,7 +44,7 @@ BACKUP_DIR="$SCRIPT_DIR/backups"
 IFS=',' read -r -a DATABASES <<< "$DB_DATABASES"
 
 # --- Config for tables to ignore ---
-declare -A IGNORE_TABLES
+declare -A IGNORE_TABLES 2>/dev/null || true
 
 # Parse DB_IGNORE_TABLES format: "db1.table1,db1.table2,db2.table3"
 if [ -n "$DB_IGNORE_TABLES" ]; then
@@ -61,73 +64,64 @@ fi
 
 mkdir -p "$BACKUP_DIR"
 
-echo ""
 echo "Starting database backup..."
 
 # ----------------------
-# Backup Databases
+# Process each database completely
 # ----------------------
 for DATABASE in "${DATABASES[@]}"; do
-    echo "Backing up ${DATABASE}..."
+    echo ""
+    echo "Processing ${DATABASE}..."
 
+    # --- 1. Backup ---
     IGNORE_PARAMS=""
     # Check if there are tables to ignore and build params
-    if [[ -v "IGNORE_TABLES[$DATABASE]" ]]; then
+    if [ -n "${IGNORE_TABLES[$DATABASE]}" ]; then
         echo "  Ignoring tables: ${IGNORE_TABLES[$DATABASE]}"
         for TBL in ${IGNORE_TABLES[$DATABASE]}; do
             IGNORE_PARAMS+=" --ignore-table=${DATABASE}.${TBL}"
         done
     fi
 
+    BACKUP_FILE="$BACKUP_DIR/${DATABASE}_${DATE}.sql.gz"
+
     # Dump structure, then data (with ignores if any)
     (
         mysqldump --no-data -u $DB_USERNAME $DATABASE
         mysqldump --single-transaction --quick --no-tablespaces --disable-keys --set-gtid-purged=OFF \
             -u $DB_USERNAME $DATABASE $IGNORE_PARAMS --no-create-info
-    ) | gzip > "$BACKUP_DIR/${DATABASE}_${DATE}.sql.gz"
+    ) | gzip > "$BACKUP_FILE"
 
-    echo "  ✓ ${DATABASE} backed up successfully"
-done
+    echo "  ✓ Backup created successfully"
 
-# ----------------------
-# Upload to S3
-# ----------------------
-aws s3 sync $BACKUP_DIR "s3://$AWS_BUCKET" \
-    --endpoint-url $AWS_ENDPOINT \
-    --exact-timestamps
+    # --- 2. Cleanup old local backups ---
+    ls -t "$BACKUP_DIR/${DATABASE}_"*.sql.gz 2>/dev/null | tail -n +$((KEEP_COUNT + 1)) | while read -r FILE; do
+        rm -f "$FILE"
+        echo "  ✓ Deleted old local backup: $(basename "$FILE")"
+    done || true
 
-# ----------------------
-# Cleanup old backups
-# ----------------------
-for DATABASE in "${DATABASES[@]}"; do
-    echo "Cleaning up old backups for ${DATABASE}..."
+    # --- 3. Upload new backup to S3 ---
+    if ! aws s3 cp "$BACKUP_FILE" "s3://$AWS_BUCKET/$(basename "$BACKUP_FILE")" \
+        --endpoint-url $AWS_ENDPOINT > /dev/null 2>&1; then
+        echo "  ✗ Error: Failed to upload to S3"
+        exit 1
+    fi
+    echo "  ✓ Uploaded to S3"
 
-    # --- Local Cleanup ---
-    ls -t "$BACKUP_DIR/${DATABASE}_"*.sql.gz | tail -n +$((KEEP_COUNT + 1)) | xargs -I {} rm -f {}
-
-    # --- S3 Cleanup ---
-    OBJECTS=$(aws s3api list-objects-v2 --bucket "$AWS_BUCKET" --prefix "${DATABASE}_" --endpoint-url "$AWS_ENDPOINT" --query "sort_by(Contents, &LastModified)[].[Key]" --output text)
-    OBJECT_COUNT=$(echo "$OBJECTS" | grep -c .)
-
-    if [ "$OBJECT_COUNT" -gt "$KEEP_COUNT" ]; then
-        DELETE_COUNT=$((OBJECT_COUNT - KEEP_COUNT))
-        OBJECTS_TO_DELETE=$(echo "$OBJECTS" | head -n $DELETE_COUNT | awk '{print "Key="$1}' | tr '\n' ' ')
-
-        if [ -n "$OBJECTS_TO_DELETE" ]; then
-            aws s3api delete-objects --bucket "$AWS_BUCKET" --delete "Objects=[{${OBJECTS_TO_DELETE%?}}]" --endpoint-url "$AWS_ENDPOINT"
+    # --- 4. Cleanup old S3 backups ---
+    aws s3api list-objects-v2 --bucket "$AWS_BUCKET" --prefix "${DATABASE}_" --endpoint-url "$AWS_ENDPOINT" \
+        --query "sort_by(Contents, &LastModified)[:-$KEEP_COUNT].[Key]" --output text 2>/dev/null | \
+    while read -r OBJECT; do
+        if [ -n "$OBJECT" ]; then
+            aws s3 rm "s3://$AWS_BUCKET/$OBJECT" --endpoint-url "$AWS_ENDPOINT" > /dev/null 2>&1
+            echo "  ✓ Deleted old S3 backup: $OBJECT"
         fi
-    fi
+    done || true
 done
 
-# ----------------------
-# Heartbeat
-# ----------------------
-if [ $? -eq 0 ]; then
-    echo "✓ Backup completed successfully at $(date '+%Y-%m-%d %H:%M:%S')"
+echo ""
+echo "✓ All backups completed successfully on $(date '+%a, %b %-d, %Y at %H:%M:%S')"
 
-    if [ -n "$HEARTBEAT_URL" ]; then
-        curl -fsS -m 10 --retry 3 -o /dev/null "$HEARTBEAT_URL"
-    fi
-else
-    echo "✗ Backup failed at $(date '+%Y-%m-%d %H:%M:%S')"
+if [ -n "$HEARTBEAT_URL" ]; then
+    curl -fsS -m 10 --retry 3 -o /dev/null "$HEARTBEAT_URL" || true
 fi
