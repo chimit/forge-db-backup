@@ -17,15 +17,17 @@ source "$ENV_FILE"
 set +a
 
 # Validate required variables
-if [ -z "$DB_USERNAME" ] || [ -z "$DB_PASSWORD" ] || [ -z "$DB_DATABASES" ] || \
+if [ -z "$DB_USERNAME" ] || [ -z "$DB_DATABASES" ] || \
    [ -z "$AWS_BUCKET" ] || [ -z "$AWS_ENDPOINT" ] || \
    [ -z "$AWS_ACCESS_KEY_ID" ] || [ -z "$AWS_SECRET_ACCESS_KEY" ]; then
     echo "Error: Missing required environment variables in .env file"
     exit 1
 fi
 
-# Set MySQL password via environment variable
-export MYSQL_PWD="$DB_PASSWORD"
+# Set MySQL password via environment variable (if provided)
+if [ -n "$DB_PASSWORD" ]; then
+    export MYSQL_PWD="$DB_PASSWORD"
+fi
 
 # ----------------------
 # Settings
