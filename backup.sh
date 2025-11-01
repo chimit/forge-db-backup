@@ -109,15 +109,10 @@ for DATABASE in "${DATABASES[@]}"; do
 
     if [ "$OBJECT_COUNT" -gt "$KEEP_COUNT" ]; then
         DELETE_COUNT=$((OBJECT_COUNT - KEEP_COUNT))
-        OBJECTS_TO_DELETE=$(echo "$OBJECTS" | head -n $DELETE_COUNT)
+        OBJECTS_TO_DELETE=$(echo "$OBJECTS" | head -n $DELETE_COUNT | awk '{print "Key="$1}' | tr '\n' ' ')
 
         if [ -n "$OBJECTS_TO_DELETE" ]; then
-            echo "$OBJECTS_TO_DELETE" | while read -r OBJECT; do
-                if [ -n "$OBJECT" ]; then
-                    aws s3 rm "s3://$AWS_BUCKET/$OBJECT" --endpoint-url "$AWS_ENDPOINT" > /dev/null 2>&1
-                    echo "  ✓ Deleted old backup: $OBJECT"
-                fi
-            done
+            aws s3api delete-objects --bucket "$AWS_BUCKET" --delete "Objects=[{${OBJECTS_TO_DELETE%?}}]" --endpoint-url "$AWS_ENDPOINT"
         fi
     fi
 done
