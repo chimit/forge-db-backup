@@ -64,6 +64,8 @@ fi
 
 mkdir -p "$BACKUP_DIR"
 
+START_TIME=$(date +%s)
+
 echo "Starting database backup..."
 
 # ----------------------
@@ -121,8 +123,10 @@ for DATABASE in "${DATABASES[@]}"; do
     done || true
 done
 
+ELAPSED=$(($(date +%s) - START_TIME))
+
 echo ""
-echo "✓ All backups completed successfully on $(date '+%a, %b %-d, %Y at %H:%M:%S')"
+echo "✓ All backups completed successfully on $(date '+%a, %b %-d, %Y at %H:%M:%S') ($((ELAPSED / 60))m $((ELAPSED % 60))s)"
 
 if [ -n "$HEARTBEAT_URL" ]; then
     curl -fsS -m 10 --retry 3 -o /dev/null "$HEARTBEAT_URL" || true
