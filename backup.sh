@@ -77,7 +77,8 @@ for DATABASE in "${DATABASES[@]}"; do
     IGNORE_PARAMS=""
     # Check if there are tables to ignore and build params
     if [ -n "${IGNORE_TABLES[$DATABASE]}" ]; then
-        echo "  Ignoring tables: ${IGNORE_TABLES[$DATABASE]}"
+        echo "  Ignoring tables: $(echo "${IGNORE_TABLES[$DATABASE]}" | sed 's/ /, /g')"
+
         for TBL in ${IGNORE_TABLES[$DATABASE]}; do
             IGNORE_PARAMS+=" --ignore-table=${DATABASE}.${TBL}"
         done
@@ -106,7 +107,8 @@ for DATABASE in "${DATABASES[@]}"; do
         echo "  ✗ Error: Failed to upload to S3"
         exit 1
     fi
-    echo "  ✓ Uploaded to S3"
+
+    echo "  ✓ Uploaded to S3 ($(du -k "$BACKUP_FILE" | awk '{printf "%.2f MB", $1/1024}'))"
 
     # --- 4. Cleanup old S3 backups ---
     aws s3api list-objects-v2 --bucket "$AWS_BUCKET" --prefix "${DATABASE}_" --endpoint-url "$AWS_ENDPOINT" \
