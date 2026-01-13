@@ -95,7 +95,7 @@ for DATABASE in "${DATABASES[@]}"; do
             -u $DB_USERNAME $DATABASE $IGNORE_PARAMS --no-create-info
     ) | gzip > "$BACKUP_FILE"
 
-    echo "  ✓ Backup created successfully"
+    echo "  ✓ Backup created successfully: $(basename "$BACKUP_FILE")"
 
     # --- 2. Cleanup old local backups ---
     ls -t "$BACKUP_DIR/${DATABASE}_"*.sql.gz 2>/dev/null | tail -n +$((KEEP_COUNT + 1)) | while read -r FILE; do
